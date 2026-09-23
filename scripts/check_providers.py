@@ -49,17 +49,13 @@ async def check(settings: Settings) -> int:
         print("No provider is configured. Set GEMINI_API_KEYS and/or GROQ_API_KEYS.")
         return 1
 
-    model_of = {
-        "gemini": settings.gemini_model,
-        "groq": settings.groq_model,
-        "ollama": settings.ollama_model,
-    }
-
     failures = 0
     for provider in providers:
         reset_cooldowns()
-        base_name = provider.name.split("#", 1)[0]
-        label = f"{provider.name} ({model_of.get(base_name, '?')})"
+        # Read the candidate's own model rather than a name->model dict: a
+        # pool (multiple keys, or NVIDIA's multiple models per key) means
+        # candidates sharing a base name can each carry a different model.
+        label = f"{provider.name} ({getattr(provider, '_model', '?')})"
         started = time.monotonic()
 
         try:

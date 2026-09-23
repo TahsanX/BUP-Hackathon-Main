@@ -57,7 +57,12 @@ def test_optimisation_path_does_no_io(relative):
 
 
 def test_whole_pipeline_runs_without_any_api_key(monkeypatch):
-    for variable in ("GEMINI_API_KEY", "GEMINI_API_KEYS", "GROQ_API_KEY", "GROQ_API_KEYS", "OPENAI_API_KEY"):
+    for variable in (
+        "GEMINI_API_KEY", "GEMINI_API_KEYS",
+        "GROQ_API_KEY", "GROQ_API_KEYS",
+        "NVIDIA_API_KEY", "NVIDIA_API_KEYS",
+        "OPENAI_API_KEY",
+    ):
         monkeypatch.delenv(variable, raising=False)
 
     case = CASES[0]
@@ -80,7 +85,12 @@ def test_whole_pipeline_runs_without_any_api_key(monkeypatch):
 def test_no_api_key_is_present_in_the_test_environment():
     leaked = [
         name
-        for name in ("GEMINI_API_KEY", "GEMINI_API_KEYS", "GROQ_API_KEY", "GROQ_API_KEYS", "OPENAI_API_KEY")
+        for name in (
+            "GEMINI_API_KEY", "GEMINI_API_KEYS",
+            "GROQ_API_KEY", "GROQ_API_KEYS",
+            "NVIDIA_API_KEY", "NVIDIA_API_KEYS",
+            "OPENAI_API_KEY",
+        )
         if os.environ.get(name)
     ]
     if leaked:

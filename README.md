@@ -163,6 +163,12 @@ existing per-candidate cooldown in `chain.py` isolates a rate-limited key
 instead of removing the provider. This mirrors the load-balancing approach
 one of the two accepted submissions to this challenge used in production.
 
+NVIDIA NIM's free endpoints add a second axis: one key, several model ids.
+`NVIDIA_API_KEYS` x `NVIDIA_MODELS` is a cross product, so a single key with
+three model ids still becomes three independent candidates (`nvidia`,
+`nvidia#2`, `nvidia#3`) — each with its own cooldown, so a 429 or a
+temporarily-overloaded model doesn't take the other two down with it.
+
 ### Choosing the local model
 
 `scripts/eval_interpretation.py` scores a provider on 15 paraphrased notes
@@ -245,8 +251,9 @@ matter:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LLM_PROVIDER_ORDER` | `gemini,groq,ollama` | chain order; providers without credentials are skipped |
+| `LLM_PROVIDER_ORDER` | `gemini,groq,nvidia,ollama` | chain order; providers without credentials are skipped |
 | `GEMINI_API_KEYS` / `GROQ_API_KEYS` | – | comma-separated key pool per provider (a single `GEMINI_API_KEY`/`GROQ_API_KEY` also works). Each key is its own chain candidate, so one key's rate limit cools down alone instead of taking the whole provider out — see "Multi-key pooling" below |
+| `NVIDIA_API_KEYS` / `NVIDIA_MODELS` | – | build.nvidia.com free endpoints; one key fanned out across several model ids, each becoming its own chain candidate |
 | `OLLAMA_MODEL` | `gemma3:4b` | local fallback, baked into the image at build time |
 | `LLM_TOTAL_BUDGET_SECONDS` | `20` | wall-clock ceiling for interpretation |
 | `LLM_COOLDOWN_SECONDS` | `30` | how long a failing provider is skipped |

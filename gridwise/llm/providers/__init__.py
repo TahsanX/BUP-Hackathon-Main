@@ -15,9 +15,10 @@ from gridwise.core.config import Settings
 from gridwise.llm.provider import Provider
 from gridwise.llm.providers.gemini import GeminiProvider
 from gridwise.llm.providers.groq import GroqProvider
+from gridwise.llm.providers.nvidia import NvidiaProvider
 from gridwise.llm.providers.ollama import OllamaProvider
 
-__all__ = ["GeminiProvider", "GroqProvider", "OllamaProvider", "build_providers"]
+__all__ = ["GeminiProvider", "GroqProvider", "NvidiaProvider", "OllamaProvider", "build_providers"]
 
 
 def _pool_providers(cls: type[Provider], base_name: str, keys: tuple[str, ...], model: str) -> list[Provider]:
@@ -27,6 +28,18 @@ def _pool_providers(cls: type[Provider], base_name: str, keys: tuple[str, ...], 
     ]
 
 
+def _nvidia_providers(keys: tuple[str, ...], models: tuple[str, ...]) -> list[Provider]:
+    # Cross product, not a 1:1 zip: one key fanned out across every model is
+    # the common case (one free NIM key, several free-endpoint models).
+    candidates: list[Provider] = []
+    i = 0
+    for key in keys:
+        for model in models:
+            i += 1
+            candidates.append(NvidiaProvider(key, model, name="nvidia" if i == 1 else f"nvidia#{i}"))
+    return candidates
+
+
 def build_providers(settings: Settings) -> list[Provider]:
     available: list[Provider] = []
     for name in settings.provider_order:
@@ -34,6 +47,8 @@ def build_providers(settings: Settings) -> list[Provider]:
             available += _pool_providers(GeminiProvider, "gemini", settings.gemini_api_keys, settings.gemini_model)
         elif name == "groq":
             available += _pool_providers(GroqProvider, "groq", settings.groq_api_keys, settings.groq_model)
+        elif name == "nvidia":
+            available += _nvidia_providers(settings.nvidia_api_keys, settings.nvidia_models)
         elif name == "ollama":
             available.append(OllamaProvider(settings.ollama_host, settings.ollama_model))
     return available

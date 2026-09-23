@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-DEFAULT_ORDER = ("gemini", "groq", "ollama")
+DEFAULT_ORDER = ("gemini", "groq", "nvidia", "ollama")
 
 
 def _env_float(name: str, default: float) -> float:
@@ -58,13 +58,20 @@ class Settings:
     # 2026-08-16; gpt-oss-120b is Groq's recommended replacement at that tier.
     groq_model: str = "openai/gpt-oss-120b"
 
+    # build.nvidia.com free endpoints. Unlike gemini/groq, the pool here is
+    # usually one key fanned out across several *models* — build_providers()
+    # takes the cross product of keys x models, so one key + three model ids
+    # still yields three independent chain candidates.
+    nvidia_api_keys: tuple[str, ...] = ()
+    nvidia_models: tuple[str, ...] = ()
+
     ollama_host: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:3b-instruct"
 
     total_budget_seconds: float = 20.0
     cooldown_seconds: float = 30.0
     timeouts: dict[str, float] = field(
-        default_factory=lambda: {"gemini": 6.0, "groq": 6.0, "ollama": 9.0}
+        default_factory=lambda: {"gemini": 6.0, "groq": 6.0, "nvidia": 8.0, "ollama": 9.0}
     )
 
     @property
@@ -86,6 +93,10 @@ class Settings:
             gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
             groq_api_keys=_split_keys("GROQ_API_KEYS", "GROQ_API_KEY"),
             groq_model=os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
+            nvidia_api_keys=_split_keys("NVIDIA_API_KEYS", "NVIDIA_API_KEY"),
+            nvidia_models=tuple(
+                m.strip() for m in os.environ.get("NVIDIA_MODELS", "").split(",") if m.strip()
+            ),
             ollama_host=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
             ollama_model=os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct"),
             total_budget_seconds=_env_float("LLM_TOTAL_BUDGET_SECONDS", 20.0),
@@ -93,6 +104,7 @@ class Settings:
             timeouts={
                 "gemini": _env_float("GEMINI_TIMEOUT_SECONDS", 6.0),
                 "groq": _env_float("GROQ_TIMEOUT_SECONDS", 6.0),
+                "nvidia": _env_float("NVIDIA_TIMEOUT_SECONDS", 8.0),
                 "ollama": _env_float("OLLAMA_TIMEOUT_SECONDS", 9.0),
             },
         )

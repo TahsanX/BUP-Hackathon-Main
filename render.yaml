@@ -22,12 +22,17 @@ services:
       - key: LOCAL_MODEL
         value: none
       - key: LLM_PROVIDER_ORDER
-        value: gemini,groq
+        value: gemini,groq,nvidia
       # Comma-separated pool ("key1,key2") gets multiple independent chain
       # candidates per provider; a single key also works. See config.py.
       - key: GEMINI_API_KEYS
         sync: false
       - key: GROQ_API_KEYS
+        sync: false
+      # One key, several model ids -- see "Multi-key pooling" in the README.
+      - key: NVIDIA_API_KEYS
+        sync: false
+      - key: NVIDIA_MODELS
         sync: false
       - key: LLM_TOTAL_BUDGET_SECONDS
         value: "20"

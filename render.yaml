@@ -1,0 +1,33 @@
+# Render Blueprint. Import this repo at https://dashboard.render.com/blueprints
+# and Render creates the service below automatically.
+#
+# The local Ollama fallback is intentionally left out of this deployment: it
+# needs several GB of RAM to run a 3B model, and every current free tier
+# (Render, Railway, Fly) caps free instances at 512 MB. LOCAL_MODEL=none
+# builds a ~200 MB image with no Ollama layer at all; the provider chain runs
+# Gemini -> Groq only. Keep "ollama" out of LLM_PROVIDER_ORDER to match.
+services:
+  - type: web
+    name: gridwise
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      # Render passes every envVar below into the build as a matching Docker
+      # ARG, so this also controls the `ARG LOCAL_MODEL` in the Dockerfile —
+      # "none" skips the Ollama install and pull entirely, keeping the image
+      # small and the build fast on free-tier build minutes.
+      - key: LOCAL_MODEL
+        value: none
+      - key: LLM_PROVIDER_ORDER
+        value: gemini,groq
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: LLM_TOTAL_BUDGET_SECONDS
+        value: "20"
+      - key: LOG_LEVEL
+        value: INFO

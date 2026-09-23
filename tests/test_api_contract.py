@@ -145,6 +145,18 @@ def test_malformed_json_is_rejected_with_400(client):
         (lambda p: p.__setitem__("operator_notes", ["a", "b", "c", "d"]), "too-many-notes"),
         (lambda p: p.__setitem__("hours", p["hours"][:23]), "short-day"),
         (lambda p: p.__setitem__("operator_notes", ["   "]), "blank-note"),
+        (
+            lambda p: p["battery"].__setitem__(
+                "initial_energy_kwh", p["battery"]["capacity_kwh"] + 100
+            ),
+            "initial-energy-exceeds-capacity",
+        ),
+        (
+            lambda p: p["battery"].__setitem__(
+                "minimum_energy_kwh", p["battery"]["capacity_kwh"] + 100
+            ),
+            "minimum-reserve-exceeds-capacity",
+        ),
     ],
 )
 def test_structurally_invalid_requests_are_rejected(client, mutate, label):

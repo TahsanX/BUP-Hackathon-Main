@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 N_HOURS = 24
 
@@ -41,6 +41,16 @@ class BatteryInput(BaseModel):
     minimum_energy_kwh: float = Field(ge=0)
     max_charge_kwh_per_hour: float = Field(ge=0)
     max_discharge_kwh_per_hour: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _levels_within_capacity(self) -> BatteryInput:
+        # A gap found by running Tonmoy's tests/test_schema.py against our
+        # deployment: these silently produced a 200 instead of a 400.
+        if self.initial_energy_kwh > self.capacity_kwh:
+            raise ValueError("initial_energy_kwh must not exceed capacity_kwh")
+        if self.minimum_energy_kwh > self.capacity_kwh:
+            raise ValueError("minimum_energy_kwh must not exceed capacity_kwh")
+        return self
 
 
 class OptimizeRequest(BaseModel):

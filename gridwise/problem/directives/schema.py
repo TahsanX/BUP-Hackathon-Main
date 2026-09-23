@@ -86,3 +86,34 @@ JSON_SCHEMA_HINT = {
     },
     "required": ["interpretations"],
 }
+
+
+# Sent as Gemini's responseSchema (OpenAPI subset: `nullable`, no type unions).
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "interpretations": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "note_index": {"type": "integer"},
+                    "directive_type": JSON_SCHEMA_HINT["properties"]["interpretations"]["items"][
+                        "properties"
+                    ]["directive_type"],
+                    "start_hour": {"type": "integer", "nullable": True},
+                    "end_hour": {"type": "integer", "nullable": True},
+                    "value": {"type": "number", "nullable": True},
+                    "value_basis": {
+                        "type": "string",
+                        "nullable": True,
+                        "enum": ["remaining", "removed", "percent_of_capacity"],
+                    },
+                    "explanation": {"type": "string"},
+                },
+                "required": ["note_index", "directive_type", "explanation"],
+            },
+        }
+    },
+    "required": ["interpretations"],
+}

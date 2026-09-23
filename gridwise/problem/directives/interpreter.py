@@ -22,7 +22,7 @@ from gridwise.llm.chain import complete_structured
 from gridwise.llm.provider import Provider
 from gridwise.llm.types import ProviderTrace
 from gridwise.problem.directives.prompt import render_notes, system_prompt
-from gridwise.problem.directives.schema import RawDirectiveBatch
+from gridwise.problem.directives.schema import RESPONSE_SCHEMA, RawDirectiveBatch
 from gridwise.problem.directives.validate import validate_batch
 from gridwise.problem.domain import Battery, Directive, no_op
 
@@ -54,6 +54,7 @@ async def interpret_notes(
         schema=RawDirectiveBatch,
         providers=providers,
         settings=settings,
+        json_schema=RESPONSE_SCHEMA,
     )
 
     if batch is None:

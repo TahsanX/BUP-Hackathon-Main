@@ -67,6 +67,7 @@ async def complete_structured(
     providers: Sequence[Provider],
     settings: Settings | None = None,
     repair_attempts: int = 1,
+    json_schema: dict | None = None,
 ) -> tuple[T | None, ProviderTrace]:
     settings = settings or Settings.from_env()
     trace = ProviderTrace()
@@ -82,7 +83,8 @@ async def complete_structured(
             trace.record(Attempt(provider.name, "cooldown"))
             continue
 
-        timeout = min(settings.timeouts.get(provider.name, 8.0), remaining)
+        base_name = provider.name.split("#", 1)[0]
+        timeout = min(settings.timeouts.get(base_name, 8.0), remaining)
         parsed = await _ask(
             provider,
             system=system,
@@ -91,6 +93,7 @@ async def complete_structured(
             timeout=timeout,
             repair_attempts=repair_attempts,
             cooldown_seconds=settings.cooldown_seconds,
+            json_schema=json_schema or schema.model_json_schema(),
             trace=trace,
         )
         if parsed is not None:
@@ -111,6 +114,7 @@ async def _ask(
     repair_attempts: int,
     cooldown_seconds: float,
     trace: ProviderTrace,
+    json_schema: dict,
 ) -> T | None:
     prompt = user
 
@@ -121,7 +125,7 @@ async def _ask(
                 LLMRequest(
                     system=system,
                     user=prompt,
-                    json_schema=schema.model_json_schema(),
+                    json_schema=json_schema,
                     timeout=timeout,
                 )
             )

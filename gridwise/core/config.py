@@ -57,6 +57,9 @@ class Settings:
     # llama-3.3-70b-versatile was decommissioned for free/developer-tier keys on
     # 2026-08-16; gpt-oss-120b is Groq's recommended replacement at that tier.
     groq_model: str = "openai/gpt-oss-120b"
+    # Groq rate-limits per model, so one key x several models is several
+    # independent quotas. Empty means just groq_model.
+    groq_models: tuple[str, ...] = ()
 
     # build.nvidia.com free endpoints. Unlike gemini/groq, the pool here is
     # usually one key fanned out across several *models* — build_providers()
@@ -93,6 +96,9 @@ class Settings:
             gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
             groq_api_keys=_split_keys("GROQ_API_KEYS", "GROQ_API_KEY"),
             groq_model=os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
+            groq_models=tuple(
+                m.strip() for m in os.environ.get("GROQ_MODELS", "").split(",") if m.strip()
+            ),
             nvidia_api_keys=_split_keys("NVIDIA_API_KEYS", "NVIDIA_API_KEY"),
             nvidia_models=tuple(
                 m.strip() for m in os.environ.get("NVIDIA_MODELS", "").split(",") if m.strip()

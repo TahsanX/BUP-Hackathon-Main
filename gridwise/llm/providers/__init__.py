@@ -28,15 +28,14 @@ def _pool_providers(cls: type[Provider], base_name: str, keys: tuple[str, ...], 
     ]
 
 
-def _nvidia_providers(keys: tuple[str, ...], models: tuple[str, ...]) -> list[Provider]:
-    # Cross product, not a 1:1 zip: one key fanned out across every model is
-    # the common case (one free NIM key, several free-endpoint models).
+def _cross_providers(cls, base_name: str, keys: tuple[str, ...], models: tuple[str, ...]) -> list[Provider]:
+    # Keys x models, not a zip: rate limits are per (key, model), so one key
+    # fanned out across several models is several independent quotas.
     candidates: list[Provider] = []
-    i = 0
     for key in keys:
         for model in models:
-            i += 1
-            candidates.append(NvidiaProvider(key, model, name="nvidia" if i == 1 else f"nvidia#{i}"))
+            n = len(candidates) + 1
+            candidates.append(cls(key, model, name=base_name if n == 1 else f"{base_name}#{n}"))
     return candidates
 
 
@@ -46,9 +45,10 @@ def build_providers(settings: Settings) -> list[Provider]:
         if name == "gemini":
             available += _pool_providers(GeminiProvider, "gemini", settings.gemini_api_keys, settings.gemini_model)
         elif name == "groq":
-            available += _pool_providers(GroqProvider, "groq", settings.groq_api_keys, settings.groq_model)
+            models = settings.groq_models or (settings.groq_model,)
+            available += _cross_providers(GroqProvider, "groq", settings.groq_api_keys, models)
         elif name == "nvidia":
-            available += _nvidia_providers(settings.nvidia_api_keys, settings.nvidia_models)
+            available += _cross_providers(NvidiaProvider, "nvidia", settings.nvidia_api_keys, settings.nvidia_models)
         elif name == "ollama":
             available.append(OllamaProvider(settings.ollama_host, settings.ollama_model))
     return available

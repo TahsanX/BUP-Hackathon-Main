@@ -62,7 +62,14 @@ async def diagnostics() -> dict:
 
 
 @app.post("/optimize-energy", response_model=OptimizeResponse)
-async def optimize_energy(request: OptimizeRequest) -> OptimizeResponse:
+async def optimize_energy(request: OptimizeRequest) -> OptimizeResponse | JSONResponse:
+    problem = request.battery.inconsistency()
+    if problem:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "invalid request", "errors": [{"field": "body.battery", "message": problem}]},
+        )
+
     response, outcome = await run_optimization(
         request, providers=_providers, settings=_settings
     )
@@ -84,11 +91,10 @@ async def optimize_energy(request: OptimizeRequest) -> OptimizeResponse:
 @app.exception_handler(RequestValidationError)
 async def _validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
     errors = exc.errors()
-    # 400 for a body that isn't well-formed JSON, 422 for well-formed but
-    # semantically wrong — the split the problem statement asks for.
+    # The problem statement: 400 = malformed JSON or structurally invalid.
     unparseable = any(e.get("type") == "json_invalid" for e in errors)
     return JSONResponse(
-        status_code=400 if unparseable else 422,
+        status_code=400,
         content={
             "detail": "malformed request" if unparseable else "invalid request",
             "errors": [

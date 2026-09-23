@@ -169,7 +169,46 @@ def test_structurally_invalid_requests_are_rejected(client, mutate, label):
 def test_duplicate_hours_are_rejected(client):
     body = payload()
     body["hours"][5] = copy.deepcopy(body["hours"][4])
+    assert client.post("/optimize-energy", json=body).status_code == 400
+
+
+@pytest.mark.parametrize(
+    "mutate, label",
+    [
+        (lambda p: p.pop("scenario_id"), "missing-field"),
+        (lambda p: p.__setitem__("scenario_id", 123), "wrong-type"),
+    ],
+)
+def test_structural_errors_are_400_per_problem_statement(client, mutate, label):
+    body = payload()
+    mutate(body)
+    assert client.post("/optimize-energy", json=body).status_code == 400, label
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_numbers_are_400_not_a_crash(client, token):
+    raw = json.dumps(payload())
+    first_tariff = f'"tariff_bdt_per_kwh": {payload()["hours"][0]["tariff_bdt_per_kwh"]}'
+    raw = raw.replace(first_tariff, f'"tariff_bdt_per_kwh": {token}', 1)
+    assert token in raw
+    response = client.post(
+        "/optimize-energy", content=raw, headers={"content-type": "application/json"}
+    )
+    assert response.status_code == 400
+
+
+def test_initial_energy_below_minimum_is_422(client):
+    body = payload()
+    body["battery"]["initial_energy_kwh"] = body["battery"]["minimum_energy_kwh"] - 1
     assert client.post("/optimize-energy", json=body).status_code == 422
+
+
+def test_zero_capacity_battery_runs_idle(client):
+    body = payload()
+    body["battery"].update(capacity_kwh=0, initial_energy_kwh=0, minimum_energy_kwh=0)
+    response = client.post("/optimize-energy", json=body)
+    assert response.status_code == 200
+    assert all(h["battery_action"] == "idle" for h in response.json()["hourly_plan"])
 
 
 def test_total_provider_failure_still_returns_a_valid_plan(client, monkeypatch):

@@ -72,9 +72,10 @@ of `LLM_PROVIDER_ORDER` there.
 | `POST /optimize-energy` | Interpretation + 24-hour plan. Schema exactly as specified in the problem statement. |
 | `GET /diagnostics` | Operational only: configured providers and a count of interpretation outcomes. |
 
-Status codes: `200` success · `400` body is not well-formed JSON · `422`
-well-formed but semantically invalid · `500` controlled internal error
-(never a stack trace, never a credential).
+Status codes: `200` success · `400` malformed JSON or structurally invalid
+(missing/mistyped field, NaN/Infinity) · `422` well-formed but physically
+impossible battery levels · `500` controlled internal error (never a stack
+trace, never a credential).
 
 ## Directive types
 

@@ -1,6 +1,6 @@
 # GridWise v2 — Scratch Rebuild Plan
 
-> **Status:** Approved · এখনো implement করা হয়নি। Phase 1 থেকে শুরু (§7)।
+> **Status (2026-09-23):** Implemented ও Vercel-এ live — https://gridwise-llm-beta.vercel.app। মূল প্ল্যান থেকে কয়েকটা সিদ্ধান্ত বদলেছে; নিচের **§12 — As-built** দেখো (§1, §5, §6, §9-এর কিছু অংশ এখন আর প্রযোজ্য নয়)।
 
 ---
 
@@ -355,3 +355,35 @@ python scripts/eval_interpretation.py
 ```
 
 **Definition of done:** ১০টা public case exact-cost match · deploy smoke test সবুজ (production-এ LLM বাস্তবে চলছে প্রমাণিত) · ২০-request load-এ relevant note-এ শূন্য `no_op` · API key ছাড়া পুরো suite পাস · `docker run` থেকে `/health` ৬০s-এর মধ্যে ready।
+
+---
+
+## 12. As-built — প্ল্যান থেকে যা বদলেছে (2026-09-23)
+
+| বিষয় | মূল প্ল্যান | বাস্তবে যা করা হয়েছে | কেন |
+|---|---|---|---|
+| Deploy | Docker (Render/Fly/Railway) primary | **Vercel serverless** primary (`api/index.py`, `vercel.json`, `pyproject.toml` dependencies) | Render free tier ১৫ মিনিট idle-এ sleep করে; বারবার restart বাস্তবসম্মত নয়। Tonmoy/Naim দুজনেই Vercel-এ চালিয়েছে |
+| Ollama | Image-এ baked, chain-এর শেষ ধাপ | Production-এ নেই; শুধু local/Docker-এ | Serverless-এ persistent model process চলে না; free tier-এ থাকতে হবে |
+| Provider order | Gemini → Groq → Ollama | **Groq → Gemini** (`LLM_PROVIDER_ORDER=groq,gemini`) | Gemini 3.x thinking-only: `thinkingBudget: 0` reject হয়, low-তেও 25–36s; পুরোনো 2.0/1.5-flash 404। Groq ~1–3s |
+| Groq | একটা model (`llama-3.3-70b-versatile`) | ১টা key × ৩ model: `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.8-27b` | Groq-এর rate limit per-model, তাই ৩টা আলাদা quota |
+| Gemini | একটা key, `gemini-2.0-flash` | **৪টা key-এর pool**, `gemini-3.5-flash-lite`, `responseSchema` + `systemInstruction` + temperature 0 | এক key 429 খেলে পরের key — Tonmoy-র approach |
+| Circuit breaker | 429/timeout-এ ৩০s cooldown | **Cooldown 0** — প্রতি request-এ সব key/model নতুন করে চেষ্টা | ৩০s cooldown একটা burst-এর পর সব candidate lock করে দিচ্ছিল |
+| Time budget | 20s; Gemini/Groq 6s | 24s; Gemini 12s, Groq 12s | ধীর model-কে সুযোগ দিতে, 30s ceiling-এর ভেতরে |
+| Pooled candidate timeout | — | `gemini#2` ইত্যাদি base provider-এর timeout পায় | আগে default 8s-এ পড়ে যাচ্ছিল |
+| Status codes | 400 malformed, 422 invalid | **400** = malformed JSON বা যেকোনো structural/type error, NaN/Infinity; **422** = well-formed কিন্তু অসম্ভব battery level (initial/minimum > capacity, initial < minimum) | Problem statement: "400 Malformed JSON or structurally invalid request"। Infinity আগে 500 দিত |
+| Zero-capacity battery | — | Accept করা হয়, battery সারাদিন idle | Tonmoy-র audit test |
+| Diagnostics | — | `ProviderTrace.summary()` failure-এ `provider:outcome[detail]` log করে (key redacted) | Production-এ কেন fail করছে দেখা যায় |
+
+### Production verification (live Vercel URL-এ, local-এ নয়)
+
+| Check | ফল |
+|---|---|
+| ১০টা public sample case | 10/10, reference cost হুবহু মিলেছে |
+| Tonmoy-র `test_schema.py` (HTTP-তে port করা) | 99/99 |
+| Tonmoy-র `test_api`, `test_security`, `test_audit_regressions`, `test_concurrency` (HTTP অংশ) | 13/13 |
+| একই request ৬ বার | প্রতিবার একই cost (38365.0) ও interpretation |
+| Local suite (API key ছাড়া) | 183 passed |
+
+Tonmoy-র `test_directives_application`, `test_guardrails`, `test_llm_failover`, `test_optimizer`, `test_randomized` তার নিজের internal function সরাসরি ডাকে — অন্য service-এর URL-এ চালানো যায় না; এই repo-তে সমতুল্য টেস্ট আছে।
+
+**জানা সীমাবদ্ধতা:** LLM output ১০০% deterministic নয় — একটা ১০x repeat run-এ একবার ভিন্ন উত্তর এসেছিল। Gemini backup হিসেবে ধীর (budget পার হতে পারে)। Chat-এ শেয়ার হওয়া API key গুলো rotate করা উচিত।

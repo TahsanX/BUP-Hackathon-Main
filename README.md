@@ -9,12 +9,36 @@ that obeys them.
 
 ```
 notes ──► LLM chain ──► guardrails ──► overlay ──► LP optimiser ──► replay ──► response
-          gemini          per-note      per-hour     scipy/HiGHS     independent
-          → groq          downgrade     arrays                       re-check
-          → ollama
+          groq (x3 models) per-note     per-hour     scipy/HiGHS     independent
+          → gemini (x4 keys) downgrade  arrays                       re-check
 ```
 
 ---
+
+**Live:** https://gridwise-llm-beta.vercel.app (Vercel serverless, free tier, no sleep).
+
+## Deploy (Vercel — production)
+
+`api/index.py` re-exports the ASGI app and `vercel.json` routes every path to it.
+Vercel's Python builder installs from `pyproject.toml` `dependencies` (it ignores
+`requirements.txt` when a pyproject exists — an empty list there gives a 500
+`FUNCTION_INVOCATION_FAILED`).
+
+```bash
+vercel link --scope <team> --project gridwise-llm
+printf '%s' "$KEY" | vercel env add GROQ_API_KEY production   # never echo keys
+vercel env add GEMINI_API_KEYS production                       # comma-separated pool
+vercel --prod
+```
+
+Production env: `LLM_PROVIDER_ORDER=groq,gemini`,
+`GROQ_MODELS=openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b`,
+`GEMINI_API_KEYS=<4 keys>`, `LLM_TOTAL_BUDGET_SECONDS=24`. Changing env vars
+requires a redeploy to take effect.
+
+Render (`render.yaml`) was tried first and dropped: its free tier sleeps after
+15 idle minutes. Ollama is not used in production (no persistent process on
+serverless); it remains available for local/Docker runs only.
 
 ## Quickstart (local, from a clean checkout)
 
@@ -140,17 +164,26 @@ Every layer degrades rather than failing:
 
 | Situation | Result |
 |---|---|
-| Gemini answers | `status=interpreted` |
-| Gemini down → Groq answers | `status=interpreted` |
-| Both down → local Ollama answers | `status=interpreted` (no quota, no network) |
+| Groq (any of 3 models) answers | `status=interpreted` |
+| Groq exhausted → any of the Gemini keys answers | `status=interpreted` |
+| (local/Docker only) → Ollama answers | `status=interpreted` (no quota, no network) |
 | One note's field is unusable | that note → `no_op`, others still applied, `status=degraded` |
 | No provider reachable | all `no_op` + unconstrained solve, `status=failed`, logged as an error |
 | LP infeasible | soft directives relaxed, `feasible=False`; physics never relaxed |
 | Relaxed LP also fails | grid-only plan — expensive but valid |
 
-Providers are tried **in order with a 30s cooldown**, not raced. Racing would
-burn every quota on every request, which is the failure being defended against.
-A hard 20s wall-clock budget keeps the whole step inside the 30s judge ceiling.
+Candidates are tried **in order**, not raced — racing would burn every quota on
+every request. There is **no cross-request cooldown** (default 0s): every
+request tries every key/model fresh, as the accepted submission does. An
+earlier 30s cooldown locked every candidate out after a single burst of 429s.
+A hard 24s wall-clock budget keeps the whole step inside the 30s judge ceiling.
+
+**Why Groq first:** Gemini 3.x models are thinking-only (`thinkingBudget: 0` is
+rejected, and even `thinkingLevel` low takes 25–36s), and the older
+non-thinking models return 404. Groq answers in ~1–3s, so it is primary and
+Gemini is the slow backup. Gemini calls use `responseSchema`
+(`directives/schema.py:RESPONSE_SCHEMA`), `systemInstruction` and
+temperature 0.
 
 ### Multi-key pooling
 
@@ -160,15 +193,17 @@ key and a single Groq key means the *entire chain* is one request away from
 5 requests was enough to reproduce this in testing. `GEMINI_API_KEYS`/
 `GROQ_API_KEYS` accept a comma-separated pool; `build_providers()` expands
 each key into its own named candidate (`gemini`, `gemini#2`, ...), so the
-existing per-candidate cooldown in `chain.py` isolates a rate-limited key
-instead of removing the provider. This mirrors the load-balancing approach
+chain simply moves on to the next key when one returns 429. This mirrors the load-balancing approach
 one of the two accepted submissions to this challenge used in production.
 
-NVIDIA NIM's free endpoints add a second axis: one key, several model ids.
-`NVIDIA_API_KEYS` x `NVIDIA_MODELS` is a cross product, so a single key with
-three model ids still becomes three independent candidates (`nvidia`,
-`nvidia#2`, `nvidia#3`) — each with its own cooldown, so a 429 or a
-temporarily-overloaded model doesn't take the other two down with it.
+Groq rate-limits **per model**, so `GROQ_API_KEYS` x `GROQ_MODELS` is a cross
+product: one Groq key with three model ids is three independent quotas
+(`groq`, `groq#2`, `groq#3`). The same cross product exists for
+`NVIDIA_API_KEYS` x `NVIDIA_MODELS` (adapter present, unused in production).
+
+Pooled candidates share their base provider's timeout (`gemini#2` uses the
+Gemini timeout), and failed attempts are logged as `provider:outcome[detail]`
+with keys redacted.
 
 ### Choosing the local model
 
@@ -216,7 +251,7 @@ Two details that matter:
 ## Tests
 
 ```bash
-pytest                                   # 161 tests, no API key, no network
+pytest                                   # 183 tests, no API key, no network
 pytest tests/test_solver_public_cases.py # the gate: all 10 public reference costs
 ```
 
@@ -226,7 +261,7 @@ pytest tests/test_solver_public_cases.py # the gate: all 10 public reference cos
 | `test_solver_edges.py` | every directive binds; overlaps stack correctly; contradictory input relaxes instead of crashing; 40 random scenarios replay clean |
 | `test_guardrails.py` | each malformed field downgrades only its own note |
 | `test_llm_failover.py` | timeout, 429, 401, malformed, empty, all-down, cooldown, budget exhaustion |
-| `test_api_contract.py` | exact response schema, 400/422 split, directive actually applied, totals agree |
+| `test_api_contract.py` | exact response schema, 400 for structural/NaN/Infinity, 422 for impossible battery levels, zero-capacity battery, directive actually applied, totals agree |
 | `test_hermeticity.py` | the LLM core never imports the problem layer; the whole pipeline runs with no key |
 | `test_deploy_smoke.py` | **runs against the deployed URL** and asserts the service really interpreted the notes |
 
@@ -237,7 +272,21 @@ GRIDWISE_BASE_URL=https://your-deployment pytest tests/test_deploy_smoke.py -v
 python scripts/load_check.py --url https://your-deployment --n 20
 ```
 
-It fails loudly if production answers with all-`no_op`. A previous iteration of
+### Production verification (2026-09-23, against the Vercel URL)
+
+| Check | Result |
+|---|---|
+| 10 public sample cases | 10/10, every cost matches the reference exactly |
+| Tonmoy's `test_schema.py` ported to HTTP | 99/99 |
+| Tonmoy's `test_api`, `test_security`, `test_audit_regressions`, `test_concurrency` (HTTP parts) | 13/13 |
+| Same request repeated 6x | identical cost and interpretation |
+
+The remaining files in the other team's suite (`test_directives_application`,
+`test_guardrails`, `test_llm_failover`, `test_optimizer`, `test_randomized`)
+call their internal functions directly and cannot target another service;
+this repo has its own equivalents.
+
+The smoke test fails loudly if production answers with all-`no_op`. A previous iteration of
 this service shipped with a platform-conditional branch that disabled the LLM in
 production; the unit suite stayed green while the deployed endpoint silently
 ignored every operator note. No configuration in this codebase branches on the
@@ -252,12 +301,14 @@ matter:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `LLM_PROVIDER_ORDER` | `gemini,groq,nvidia,ollama` | chain order; providers without credentials are skipped |
+| `LLM_PROVIDER_ORDER` | `gemini,groq,nvidia,ollama` | chain order; providers without credentials are skipped. Production: `groq,gemini` |
+| `GROQ_MODELS` | – | comma-separated Groq model ids, each its own candidate per key (default: `GROQ_MODEL` = `openai/gpt-oss-120b`) |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | Gemini model for every key in the pool |
 | `GEMINI_API_KEYS` / `GROQ_API_KEYS` | – | comma-separated key pool per provider (a single `GEMINI_API_KEY`/`GROQ_API_KEY` also works). Each key is its own chain candidate, so one key's rate limit cools down alone instead of taking the whole provider out — see "Multi-key pooling" below |
 | `NVIDIA_API_KEYS` / `NVIDIA_MODELS` | – | build.nvidia.com free endpoints; one key fanned out across several model ids, each becoming its own chain candidate |
-| `OLLAMA_MODEL` | `gemma3:4b` | local fallback, baked into the image at build time |
-| `LLM_TOTAL_BUDGET_SECONDS` | `20` | wall-clock ceiling for interpretation |
-| `LLM_COOLDOWN_SECONDS` | `30` | how long a failing provider is skipped |
+| `OLLAMA_MODEL` | `qwen2.5:3b-instruct` | local fallback, baked into the image at build time |
+| `LLM_TOTAL_BUDGET_SECONDS` | `24` | wall-clock ceiling for interpretation |
+| `LLM_COOLDOWN_SECONDS` | `0` | how long a failing candidate is skipped across requests (0 = retry every key on every request) |
 
 **Secrets.** No key is baked into the image or committed to the repo. Error
 messages pass through a redactor that strips key-shaped strings before they
@@ -271,7 +322,11 @@ surface small and makes adding a provider a single file.
 
 ## Known limitations
 
-- No response caching. Repeated identical notes re-query the model.
+- No response caching. Repeated identical notes re-query the model, and LLM
+  output is not perfectly deterministic: in one 10x repeat run a single
+  response differed.
+- Gemini is slow (25–36s thinking) and can exceed the budget; it is a backup,
+  not a peer of Groq.
 - The local fallback needs ~55s to cold-load its weights (a warm call is ~1.3s),
   so the container warms it in the background at startup. It is last in the
   chain because it is CPU-bound, not because it is inaccurate.

@@ -1,125 +1,266 @@
-# GridWise LLM
+# GridWise
 
-GridWise LLM is an energy optimization API for a 24-hour facility schedule. It interprets operator notes, applies operational constraints, and returns a validated battery, solar, and grid usage plan.
+LLM-assisted 24-hour campus energy scheduling API.
 
-## Live Deployment
+Given a day of demand, solar and tariff data, a battery spec, and 1–3 free-text
+operator notes, the service interprets the notes into structured directives,
+validates them deterministically, and returns a cost-minimal 24-hour schedule
+that obeys them.
 
-- API: https://doc2026-09-1821-35-33git.vercel.app
-- Swagger UI: https://doc2026-09-1821-35-33git.vercel.app/docs
-- Health check: https://doc2026-09-1821-35-33git.vercel.app/health
-- Source code: https://github.com/HinataHamura/GridWise-LLM
-
-## API Endpoints
-
-### `GET /`
-Returns service information and links to the API resources.
-
-### `GET /health`
-Returns the service health status.
-
-### `POST /optimize-energy`
-Interprets 1-3 operator notes and optimizes a complete 24-hour energy schedule.
-
-The request must contain:
-
-- `scenario_id`: unique scenario name
-- `operator_notes`: 1-3 non-empty operational notes
-- `hours`: exactly one entry for every hour from 0 to 23
-- `battery`: battery capacity, reserve, and charge/discharge limits
-
-Example request:
-
-```json
-{
-  "scenario_id": "DEMO-001",
-  "operator_notes": [
-    "Solar output will drop by 50% between 10 AM and 1 PM due to shading."
-  ],
-  "hours": [
-    {
-      "hour": 0,
-      "demand_kwh": 90,
-      "solar_kwh": 0,
-      "tariff_bdt_per_kwh": 6
-    }
-  ],
-  "battery": {
-    "capacity_kwh": 200,
-    "initial_energy_kwh": 100,
-    "minimum_energy_kwh": 20,
-    "max_charge_kwh_per_hour": 50,
-    "max_discharge_kwh_per_hour": 50
-  }
-}
+```
+notes ──► LLM chain ──► guardrails ──► overlay ──► LP optimiser ──► replay ──► response
+          gemini          per-note      per-hour     scipy/HiGHS     independent
+          → groq          downgrade     arrays                       re-check
+          → ollama
 ```
 
-The `hours` array must include all 24 hourly objects. The response includes the interpreted directives, a 24-hour `hourly_plan`, total grid usage, total cost, peak grid usage, and a plan summary.
+---
 
-Example request with cURL:
-
-```bash
-curl -X POST https://doc2026-09-1821-35-33git.vercel.app/optimize-energy \
-  -H "Content-Type: application/json" \
-  -d @request.json
-```
-
-## Supported Directives
-
-The interpretation layer supports:
-
-- Solar reduction windows
-- Minimum battery reserve windows
-- No-charge windows
-- No-discharge windows
-- Maximum grid import windows
-- Irrelevant notes as `no_op`
-
-All returned plans are checked against energy balance, battery limits, directive constraints, cost totals, and end-of-day battery neutrality.
-
-## Run Locally
+## Quickstart (local, from a clean checkout)
 
 ```bash
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# macOS/Linux
-source .venv/bin/activate
-
+git clone <this-repo> && cd GridWise-LLM
+python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-uvicorn api.index:app --reload
+
+cp .env.example .env        # add GEMINI_API_KEY and/or GROQ_API_KEY
+set -a && . ./.env && set +a
+
+uvicorn gridwise.api.app:app --port 8000
 ```
 
-Then open http://127.0.0.1:8000/docs.
-
-For local LLM interpretation, configure provider keys in a `.env` file. Never commit `.env` or expose API keys publicly.
-
-```env
-GEMINI_API_KEY=your_key
-GROQ_API_KEY=your_key
-HF_API_TOKEN=your_token
-```
-
-## Testing
+Then, in another shell:
 
 ```bash
-pytest -q
+curl -s localhost:8000/health
+# {"status":"ok"}
+
+curl -s -X POST localhost:8000/optimize-energy \
+  -H 'content-type: application/json' \
+  -d "$(python3 -c "import json;print(json.dumps(json.load(open('tests/fixtures/public_sample_cases.json'))['cases'][0]['input']))")" \
+  | python3 -m json.tool | head -30
 ```
 
-## Deployment
+Expected for sample case 1: note 0 → `solar_reduction`, hours `[12, 13]`,
+factor `0.25`; note 1 → `no_op`; 24 plan entries; `total_cost_bdt` `38365.00`.
 
-The project is configured for Vercel's Python runtime. `api/index.py` exposes the FastAPI application and `vercel.json` preserves public API paths during rewrites.
+## Quickstart (Docker)
 
-## Project Structure
-
-```text
-api/index.py          Vercel ASGI entrypoint
-app/main.py           FastAPI application and routes
-app/graph.py          Interpretation workflow
-app/llm.py            LLM provider chain
-app/optimizer.py      Battery and grid optimization
-app/validators.py     Deterministic directive validation
-app/final_validator.py Plan replay validation
-tests/                Unit and public-case tests
+```bash
+docker build -t gridwise:2.0.0 .        # ~3 GB: the local fallback model is baked in
+docker run -p 8000:8000 --env-file .env gridwise:2.0.0
+curl -s localhost:8000/health
 ```
+
+or `docker compose up --build`. To build a small image without the local model:
+
+```bash
+docker build --build-arg LOCAL_MODEL=none -t gridwise:slim .
+docker run -e LLM_PROVIDER_ORDER=gemini,groq -p 8000:8000 --env-file .env gridwise:slim
+```
+
+That image has no local fallback, so the chain ends at Groq — keep `ollama` out
+of `LLM_PROVIDER_ORDER` there.
+
+---
+
+## API
+
+| Endpoint | Behaviour |
+|---|---|
+| `GET /health` | `{"status":"ok"}`. Never probes a model, so readiness cannot be held hostage by a third party. |
+| `POST /optimize-energy` | Interpretation + 24-hour plan. Schema exactly as specified in the problem statement. |
+| `GET /diagnostics` | Operational only: configured providers and a count of interpretation outcomes. |
+
+Status codes: `200` success · `400` body is not well-formed JSON · `422`
+well-formed but semantically invalid · `500` controlled internal error
+(never a stack trace, never a credential).
+
+## Directive types
+
+| Type | `structured_adjustment` | Effect on the model |
+|---|---|---|
+| `solar_reduction` | `{hours, factor}` | `effective_solar[h] *= factor` (factor is what REMAINS) |
+| `minimum_battery_reserve` | `{hours, minimum_energy_kwh}` | raises the battery floor in those hours |
+| `no_charge_window` | `{hours}` | charge bound forced to 0 |
+| `no_discharge_window` | `{hours}` | discharge bound forced to 0 |
+| `max_grid_window` | `{hours, max_grid_kwh}` | caps hourly grid import |
+| `no_op` | `null` | nothing |
+
+Windows are whole hours, start-inclusive and end-exclusive: "1 PM to 3 PM" is
+`[13, 14]`.
+
+---
+
+## Architecture
+
+**`gridwise/llm/` and `gridwise/core/` are problem-agnostic.** They take a
+prompt pair plus a pydantic model and return a validated instance; they contain
+no reference to energy, batteries or schedules. A test asserts that neither
+layer imports `gridwise/problem/`, so the block can be lifted into another
+project by swapping only the prompt and the schema.
+
+```
+gridwise/
+  core/config.py            env-driven settings; no platform detection anywhere
+  llm/
+    types.py                typed error taxonomy (auth / rate-limit / timeout / malformed)
+    chain.py                failover, circuit breaker, time budget, one repair retry
+    json_guard.py           recovers JSON from fences, prose and trailing commas
+    providers/              gemini, groq, ollama adapters (async httpx)
+  problem/
+    directives/prompt.py    system prompt + few-shot   <- the swap point
+    directives/validate.py  deterministic guardrails, per-note downgrade
+    directives/overlay.py   directives -> per-hour constraint arrays
+    solver/model.py         LP construction (120 vars, 49 equality rows)
+    solver/solve.py         solve, net, reconcile, end-of-day repair
+    solver/replay.py        independent rule checker, written from the spec
+    pipeline.py             request -> response
+  api/app.py                FastAPI surface
+```
+
+### How the LLM is used
+
+All notes go out in **one batched call**. The model returns a uniform
+`{note_index, directive_type, hours, value, explanation}` per note; a single
+generic `value` field is markedly easier for small models to emit correctly than
+type-specific keys, and it is mapped back to the official per-type key on the
+way out.
+
+Model output is treated as untrusted. Nothing reaches the optimiser until
+`directives/validate.py` has checked the type against the allowed set, the hours
+for uniqueness/range/ordering, and the numeric payload against its bounds.
+`applies` is *derived* from the directive type rather than trusted, so an
+`applies=true` on a `no_op` is structurally impossible.
+
+### Degradation ladder
+
+Every layer degrades rather than failing:
+
+| Situation | Result |
+|---|---|
+| Gemini answers | `status=interpreted` |
+| Gemini down → Groq answers | `status=interpreted` |
+| Both down → local Ollama answers | `status=interpreted` (no quota, no network) |
+| One note's field is unusable | that note → `no_op`, others still applied, `status=degraded` |
+| No provider reachable | all `no_op` + unconstrained solve, `status=failed`, logged as an error |
+| LP infeasible | soft directives relaxed, `feasible=False`; physics never relaxed |
+| Relaxed LP also fails | grid-only plan — expensive but valid |
+
+Providers are tried **in order with a 30s cooldown**, not raced. Racing would
+burn every quota on every request, which is the failure being defended against.
+A hard 20s wall-clock budget keeps the whole step inside the 30s judge ceiling.
+
+### Choosing the local model
+
+`scripts/eval_interpretation.py` scores a provider on 15 paraphrased notes
+written unlike the public pack. Measured over three runs on CPU:
+
+| model | image cost | accuracy | mean latency |
+|---|---|---|---|
+| `gemma3:4b` | 3.3 GB | 14/15 | 1.8s |
+| **`qwen2.5:3b-instruct`** (default) | **1.9 GB** | **14/15** | **1.3s** |
+| `qwen2.5:1.5b-instruct` | 1.0 GB | 14/15 | 0.9s |
+
+Accuracy is flat across the three, so the 3B wins on image size. The 1.5B is
+faster still, but it misread "2 in the afternoon" as hour 2 — an AM/PM error
+the larger models did not make, and the kind of mistake the guardrails cannot
+catch. Its remaining 0.4s is invisible anyway: the local model runs third, so
+reaching it already means ~12s of upstream timeouts have elapsed.
+
+Those numbers only converged *after* the calculations moved out of the prompt.
+Before that, the same eval scored the 4B at 60% and the 1.5B at 80%; the gap
+between model sizes was almost entirely arithmetic the models should never have
+been asked to do. Re-run the eval before changing `OLLAMA_MODEL`.
+
+### Optimiser
+
+A linear program (`scipy.optimize.linprog`, HiGHS): 5 continuous variables per
+hour — grid, solar used, charge, discharge, stored energy — minimising
+`Σ grid[h] × tariff[h]`. Equality rows carry the hourly energy balance, the
+battery recursion, and end-of-day neutrality.
+
+Two details that matter:
+
+- **No hour both charges and discharges.** Lossless 1:1 storage makes
+  `(charge+δ, discharge+δ)` cost-identical, and the response schema cannot
+  express it. A 1e-6 tie-break makes such loops strictly suboptimal, and a
+  netting pass guarantees it regardless — netting preserves `discharge − charge`,
+  so balance, energy path and cost are all unchanged.
+- **Reported totals cannot drift.** `grid_kwh` is re-derived from the balance
+  equation and `battery_energy_after_kwh` from a forward replay, then the totals
+  are summed from the plan itself — so the judge's recalculation agrees by
+  construction.
+
+---
+
+## Tests
+
+```bash
+pytest                                   # 161 tests, no API key, no network
+pytest tests/test_solver_public_cases.py # the gate: all 10 public reference costs
+```
+
+| Suite | Covers |
+|---|---|
+| `test_solver_public_cases.py` | all 10 official cases reproduce the reference cost exactly (0.00 BDT deviation) and pass independent replay |
+| `test_solver_edges.py` | every directive binds; overlaps stack correctly; contradictory input relaxes instead of crashing; 40 random scenarios replay clean |
+| `test_guardrails.py` | each malformed field downgrades only its own note |
+| `test_llm_failover.py` | timeout, 429, 401, malformed, empty, all-down, cooldown, budget exhaustion |
+| `test_api_contract.py` | exact response schema, 400/422 split, directive actually applied, totals agree |
+| `test_hermeticity.py` | the LLM core never imports the problem layer; the whole pipeline runs with no key |
+| `test_deploy_smoke.py` | **runs against the deployed URL** and asserts the service really interpreted the notes |
+
+The deployment smoke test is the important one:
+
+```bash
+GRIDWISE_BASE_URL=https://your-deployment pytest tests/test_deploy_smoke.py -v
+python scripts/load_check.py --url https://your-deployment --n 20
+```
+
+It fails loudly if production answers with all-`no_op`. A previous iteration of
+this service shipped with a platform-conditional branch that disabled the LLM in
+production; the unit suite stayed green while the deployed endpoint silently
+ignored every operator note. No configuration in this codebase branches on the
+hosting platform, and this test exists so that class of bug cannot ship again.
+
+---
+
+## Configuration
+
+All settings are environment variables — see `.env.example`. The ones that
+matter:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LLM_PROVIDER_ORDER` | `gemini,groq,ollama` | chain order; providers without credentials are skipped |
+| `GEMINI_API_KEY` / `GROQ_API_KEY` | – | cloud credentials |
+| `OLLAMA_MODEL` | `gemma3:4b` | local fallback, baked into the image at build time |
+| `LLM_TOTAL_BUDGET_SECONDS` | `20` | wall-clock ceiling for interpretation |
+| `LLM_COOLDOWN_SECONDS` | `30` | how long a failing provider is skipped |
+
+**Secrets.** No key is baked into the image or committed to the repo. Error
+messages pass through a redactor that strips key-shaped strings before they
+reach a log or a response body.
+
+## Dependencies
+
+`fastapi` · `uvicorn` · `pydantic` · `numpy` · `scipy` · `httpx`. No LLM vendor
+SDK: each provider is a thin async HTTP adapter, which keeps the dependency
+surface small and makes adding a provider a single file.
+
+## Known limitations
+
+- No response caching. Repeated identical notes re-query the model.
+- The local fallback needs ~55s to cold-load its weights (a warm call is ~1.3s),
+  so the container warms it in the background at startup. It is last in the
+  chain because it is CPU-bound, not because it is inaccurate.
+- Wraparound windows ("11 PM to 2 AM") rely on the model emitting the hour list
+  directly; they are validated but not independently re-derived from the text.
+- `/diagnostics` counters are per-process and reset on restart.
+
+## Reference material
+
+`parallel-solutions/` holds two other teams' submissions to the same challenge,
+kept for comparison. They are independent git clones and are excluded from this
+repository and from the test run.

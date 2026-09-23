@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gridwise"
+version = "2.0.0"
+description = "LLM-assisted 24-hour campus energy scheduling API"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+include = ["gridwise*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# parallel-solutions holds other teams' repos, kept for reference only.
+norecursedirs = ["parallel-solutions", ".git", "__pycache__"]
+addopts = "-q"

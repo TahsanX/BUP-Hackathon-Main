@@ -1,0 +1,22 @@
+services:
+  gridwise:
+    build:
+      context: .
+      args:
+        LOCAL_MODEL: ${LOCAL_MODEL:-qwen2.5:3b-instruct}
+    image: gridwise:2.0.0
+    ports:
+      - "8000:8000"
+    environment:
+      LLM_PROVIDER_ORDER: ${LLM_PROVIDER_ORDER:-gemini,groq,ollama}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      LLM_TOTAL_BUDGET_SECONDS: ${LLM_TOTAL_BUDGET_SECONDS:-20}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx;httpx.get('http://127.0.0.1:8000/health').raise_for_status()"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped

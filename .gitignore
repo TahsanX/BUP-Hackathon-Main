@@ -1,5 +1,15 @@
-BUP_CSE_FEST_2026_Preli_Public_Sample_Cases.json
-BUP_CSE_FEST_2026_Preliminary_Problem_Statement_GridWise_LLM.pdf
-GridWise_LLM_Interpretation_Plan.md
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
 .env
 .vercel
+
+# Windows download metadata that rides along with the PDFs
+*:Zone.Identifier
+
+# Reference clones of other teams' submissions (each has its own .git)
+parallel-solutions/

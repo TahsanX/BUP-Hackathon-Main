@@ -69,7 +69,7 @@ class Settings:
     ollama_model: str = "qwen2.5:3b-instruct"
 
     total_budget_seconds: float = 24.0
-    cooldown_seconds: float = 30.0
+    cooldown_seconds: float = 0.0
     timeouts: dict[str, float] = field(
         default_factory=lambda: {"gemini": 12.0, "groq": 12.0, "nvidia": 8.0, "ollama": 9.0}
     )
@@ -100,7 +100,7 @@ class Settings:
             ollama_host=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
             ollama_model=os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct"),
             total_budget_seconds=_env_float("LLM_TOTAL_BUDGET_SECONDS", 24.0),
-            cooldown_seconds=_env_float("LLM_COOLDOWN_SECONDS", 30.0),
+            cooldown_seconds=_env_float("LLM_COOLDOWN_SECONDS", 0.0),
             timeouts={
                 "gemini": _env_float("GEMINI_TIMEOUT_SECONDS", 12.0),
                 "groq": _env_float("GROQ_TIMEOUT_SECONDS", 12.0),

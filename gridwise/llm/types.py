@@ -89,5 +89,8 @@ class ProviderTrace:
         self.attempts.append(attempt)
 
     def summary(self) -> str:
-        trail = " -> ".join(f"{a.provider}:{a.outcome}" for a in self.attempts) or "none"
+        trail = " -> ".join(
+            f"{a.provider}:{a.outcome}" + (f"[{redact(str(a.detail))[:160]}]" if a.outcome not in ("ok", "cooldown") and a.detail else "")
+            for a in self.attempts
+        ) or "none"
         return f"winner={self.winner or 'none'} repaired={self.repaired} trail={trail}"

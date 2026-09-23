@@ -23,9 +23,11 @@ services:
         value: none
       - key: LLM_PROVIDER_ORDER
         value: gemini,groq
-      - key: GEMINI_API_KEY
+      # Comma-separated pool ("key1,key2") gets multiple independent chain
+      # candidates per provider; a single key also works. See config.py.
+      - key: GEMINI_API_KEYS
         sync: false
-      - key: GROQ_API_KEY
+      - key: GROQ_API_KEYS
         sync: false
       - key: LLM_TOTAL_BUDGET_SECONDS
         value: "20"

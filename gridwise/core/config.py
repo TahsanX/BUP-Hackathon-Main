@@ -23,18 +23,37 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _split_keys(*env_names: str) -> tuple[str, ...]:
+    """Merge a comma-separated *_API_KEYS var and a singular *_API_KEY var into
+    one ordered, de-duplicated key pool. A pool of size N > 1 gives the
+    provider chain N independent candidates instead of one: a key that gets
+    rate-limited cools down alone, and its siblings keep answering requests.
+    Never logs the values."""
+    keys: list[str] = []
+    for name in env_names:
+        raw = os.environ.get(name, "")
+        for part in raw.split(","):
+            part = part.strip()
+            if part and part not in keys:
+                keys.append(part)
+    return tuple(keys)
+
+
 @dataclass(frozen=True)
 class Settings:
     provider_order: tuple[str, ...] = DEFAULT_ORDER
 
-    gemini_api_key: str | None = None
+    # A pool, not a single key: GEMINI_API_KEYS="k1,k2" (or one GEMINI_API_KEY)
+    # gives the chain multiple independent candidates for the same provider,
+    # so one key's rate limit doesn't take Gemini out of the chain entirely.
+    gemini_api_keys: tuple[str, ...] = ()
     # 2.0-flash shut down 2026-06-01 and 2.5-* is closed to new projects. Start on
     # the cheap/fast tier and move up to gemini-3.8-flash if the interpretation
     # eval shows misses — a semantically wrong directive is the one failure the
     # guardrails cannot catch, so first-provider accuracy is worth paying for.
     gemini_model: str = "gemini-3.5-flash-lite"
 
-    groq_api_key: str | None = None
+    groq_api_keys: tuple[str, ...] = ()
     # llama-3.3-70b-versatile was decommissioned for free/developer-tier keys on
     # 2026-08-16; gpt-oss-120b is Groq's recommended replacement at that tier.
     groq_model: str = "openai/gpt-oss-120b"
@@ -48,15 +67,24 @@ class Settings:
         default_factory=lambda: {"gemini": 6.0, "groq": 6.0, "ollama": 9.0}
     )
 
+    @property
+    def gemini_api_key(self) -> str | None:
+        """First key in the pool, for callers that only want a single one."""
+        return self.gemini_api_keys[0] if self.gemini_api_keys else None
+
+    @property
+    def groq_api_key(self) -> str | None:
+        return self.groq_api_keys[0] if self.groq_api_keys else None
+
     @classmethod
     def from_env(cls) -> Settings:
         raw_order = os.environ.get("LLM_PROVIDER_ORDER", "")
         order = tuple(p.strip() for p in raw_order.split(",") if p.strip()) or DEFAULT_ORDER
         return cls(
             provider_order=order,
-            gemini_api_key=os.environ.get("GEMINI_API_KEY") or None,
+            gemini_api_keys=_split_keys("GEMINI_API_KEYS", "GEMINI_API_KEY"),
             gemini_model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
-            groq_api_key=os.environ.get("GROQ_API_KEY") or None,
+            groq_api_keys=_split_keys("GROQ_API_KEYS", "GROQ_API_KEY"),
             groq_model=os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b"),
             ollama_host=os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434"),
             ollama_model=os.environ.get("OLLAMA_MODEL", "qwen2.5:3b-instruct"),

@@ -11,9 +11,11 @@ URL = "https://api.groq.com/openai/v1/chat/completions"
 class GroqProvider:
     name = "groq"
 
-    def __init__(self, api_key: str | None, model: str) -> None:
+    def __init__(self, api_key: str | None, model: str, name: str | None = None) -> None:
         self._api_key = api_key
         self._model = model
+        if name:
+            self.name = name
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         if not self._api_key:

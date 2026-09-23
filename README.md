@@ -151,6 +151,18 @@ Providers are tried **in order with a 30s cooldown**, not raced. Racing would
 burn every quota on every request, which is the failure being defended against.
 A hard 20s wall-clock budget keeps the whole step inside the 30s judge ceiling.
 
+### Multi-key pooling
+
+A free-tier key's rate limit is per-key, not per-provider, so a single Gemini
+key and a single Groq key means the *entire chain* is one request away from
+"all candidates failed" the moment either key's RPM limit trips — a burst of
+5 requests was enough to reproduce this in testing. `GEMINI_API_KEYS`/
+`GROQ_API_KEYS` accept a comma-separated pool; `build_providers()` expands
+each key into its own named candidate (`gemini`, `gemini#2`, ...), so the
+existing per-candidate cooldown in `chain.py` isolates a rate-limited key
+instead of removing the provider. This mirrors the load-balancing approach
+one of the two accepted submissions to this challenge used in production.
+
 ### Choosing the local model
 
 `scripts/eval_interpretation.py` scores a provider on 15 paraphrased notes
@@ -234,7 +246,7 @@ matter:
 | Variable | Default | Purpose |
 |---|---|---|
 | `LLM_PROVIDER_ORDER` | `gemini,groq,ollama` | chain order; providers without credentials are skipped |
-| `GEMINI_API_KEY` / `GROQ_API_KEY` | – | cloud credentials |
+| `GEMINI_API_KEYS` / `GROQ_API_KEYS` | – | comma-separated key pool per provider (a single `GEMINI_API_KEY`/`GROQ_API_KEY` also works). Each key is its own chain candidate, so one key's rate limit cools down alone instead of taking the whole provider out — see "Multi-key pooling" below |
 | `OLLAMA_MODEL` | `gemma3:4b` | local fallback, baked into the image at build time |
 | `LLM_TOTAL_BUDGET_SECONDS` | `20` | wall-clock ceiling for interpretation |
 | `LLM_COOLDOWN_SECONDS` | `30` | how long a failing provider is skipped |

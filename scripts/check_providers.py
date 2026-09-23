@@ -46,7 +46,7 @@ EXPECTED = [("solar_reduction", (10, 11, 12), 0.25), ("no_op", (), None)]
 async def check(settings: Settings) -> int:
     providers = build_providers(settings)
     if not providers:
-        print("No provider is configured. Set GEMINI_API_KEY and/or GROQ_API_KEY.")
+        print("No provider is configured. Set GEMINI_API_KEYS and/or GROQ_API_KEYS.")
         return 1
 
     model_of = {
@@ -58,7 +58,8 @@ async def check(settings: Settings) -> int:
     failures = 0
     for provider in providers:
         reset_cooldowns()
-        label = f"{provider.name} ({model_of.get(provider.name, '?')})"
+        base_name = provider.name.split("#", 1)[0]
+        label = f"{provider.name} ({model_of.get(base_name, '?')})"
         started = time.monotonic()
 
         try:

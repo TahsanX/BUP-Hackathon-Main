@@ -11,9 +11,14 @@ BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 class GeminiProvider:
     name = "gemini"
 
-    def __init__(self, api_key: str | None, model: str) -> None:
+    def __init__(self, api_key: str | None, model: str, name: str | None = None) -> None:
         self._api_key = api_key
         self._model = model
+        if name:
+            # Distinguishes key pool members (e.g. "gemini#2") so a rate-limited
+            # key cools down alone instead of taking every key for this
+            # provider down with it.
+            self.name = name
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         if not self._api_key:
